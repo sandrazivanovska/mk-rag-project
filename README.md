@@ -1,9 +1,6 @@
 # Retrieval Quality vs Generation Quality in Low-Resource RAG
 ## A Bilingual Study on Macedonian
 
-> **Research Project** — Sandra Živanovska
-> Supervisor: Sonja
-
 ---
 
 ## Research Questions
