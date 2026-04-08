@@ -1,0 +1,65 @@
+# Core ML / NLP
+torch>=2.1.0
+transformers>=4.40.0
+sentence-transformers>=3.0.0
+FlagEmbedding>=1.2.0          # BGE-M3 and bge-reranker-v2-m3
+
+# Retrieval
+faiss-cpu>=1.7.4              # Switch to faiss-gpu if GPU available
+rank-bm25>=0.2.2
+pyserini>=0.22.0              # BM25 via Anserini (optional, needs Java)
+
+# Orchestration
+langchain>=0.2.0
+langchain-community>=0.2.0
+langchain-openai>=0.1.0
+langchain-anthropic>=0.1.0
+llama-index>=0.10.0
+
+# LLM APIs
+openai>=1.30.0
+anthropic>=0.28.0
+
+# Translation
+google-cloud-translate>=3.15.0
+deep-translator>=1.11.4       # Fallback: no API key needed for small batches
+
+# Data ingestion
+wikiextractor>=3.0.6
+datasets>=2.19.0              # HuggingFace datasets (LVSTCK corpus)
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=5.2.0
+tqdm>=4.66.0
+
+# Preprocessing
+nltk>=3.8.1
+spacy>=3.7.0
+langdetect>=1.0.9
+tiktoken>=0.7.0               # Token counting
+
+# Evaluation
+ragas>=0.1.9
+rouge-score>=0.1.2
+sacrebleu>=2.4.0
+bert-score>=0.3.13
+
+# Utilities
+python-dotenv>=1.0.0
+pydantic>=2.7.0
+pydantic-settings>=2.2.0
+numpy>=1.26.0
+pandas>=2.2.0
+jsonlines>=4.0.0
+loguru>=0.7.0
+rich>=13.7.0                  # Pretty terminal output
+typer>=0.12.0                 # CLI
+
+# Dev / Testing
+pytest>=8.2.0
+pytest-asyncio>=0.23.0
+black>=24.4.0
+ruff>=0.4.0
+mypy>=1.10.0
+ipykernel>=6.29.0
+jupyter>=1.0.0

@@ -1,0 +1,86 @@
+# ── Default experiment configuration ─────────────────────────────────────────
+project:
+  name: mk-rag
+  description: "Retrieval Quality vs Generation Quality in Low-Resource RAG: A Bilingual Study on Macedonian"
+
+models:
+  embed_primary: "BAAI/bge-m3"
+  embed_baseline: "intfloat/multilingual-e5-large-instruct"
+  reranker: "BAAI/bge-reranker-v2-m3"
+  generators:
+    - name: gpt4o
+      provider: openai
+      model_id: gpt-4o
+    - name: claude_sonnet
+      provider: anthropic
+      model_id: claude-sonnet-4-5
+
+retrieval:
+  top_k_first_stage: 50
+  top_k_rerank: 5
+  bm25_k1: 1.5
+  bm25_b: 0.75
+  hybrid_alpha: 0.5          # weight for dense vs BM25 in hybrid (0=BM25 only, 1=dense only)
+  use_reranker: true
+
+chunking:
+  strategy: sentence          # sentence | fixed | paragraph
+  chunk_size: 384             # target tokens
+  chunk_overlap: 64           # overlap tokens
+
+generation:
+  max_tokens: 512
+  temperature: 0.0
+  system_prompt_mk: |
+    Одговори на прашањето само врз основа на дадениот контекст.
+    Одговорот напиши на македонски јазик.
+    Ако контекстот не содржи доволно информации, кажи дека не знаеш.
+
+evaluation:
+  metrics:
+    - faithfulness
+    - answer_relevancy
+    - context_precision
+    - context_recall
+    - answer_correctness
+  ragas_llm: gpt-4o           # LLM used internally by RAGAS for scoring
+
+pipelines:
+  - id: mk_bm25
+    name: "MK-BM25"
+    retrieval: bm25
+    corpus_lang: mk
+    use_reranker: false
+  - id: mk_dense
+    name: "MK-Dense"
+    retrieval: dense
+    corpus_lang: mk
+    embed_model: primary
+  - id: mk_hybrid
+    name: "MK-Hybrid"
+    retrieval: hybrid
+    corpus_lang: mk
+    embed_model: primary
+  - id: translate_retrieve
+    name: "Translate-Retrieve"
+    retrieval: dense
+    corpus_lang: en
+    translate_query: true
+    embed_model: primary
+  - id: cross_lingual_embed
+    name: "Cross-lingual Embed"
+    retrieval: dense
+    corpus_lang: en
+    translate_query: false
+    embed_model: primary
+  - id: bilingual_fusion
+    name: "Bilingual Fusion"
+    retrieval: bilingual_fusion
+    corpus_lang: both
+    embed_model: primary
+    use_reranker: true
+
+paths:
+  data_root: data/
+  results_root: results/
+  logs_root: logs/

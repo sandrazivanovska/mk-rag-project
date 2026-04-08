@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+
+# Environment
+.env
+*.env.local
+
+# Data (large files)
+data/raw/
+data/indices/
+data/processed/
+
+# Results
+results/
+logs/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# IDE
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+
+# Model cache
+.cache/
+huggingface/
+
+# Google credentials
+*.json
+!configs/*.yaml
