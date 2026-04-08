@@ -164,10 +164,4 @@ python main.py evaluate --results-dir results/
 
 ---
 
-## References
 
-From Prof. Sonja:
-- [ACL 2024 Long Paper](https://aclanthology.org/2024.acl-long.192.pdf)
-- [arXiv 2410.14815](https://arxiv.org/pdf/2410.14815)
-- [EACL 2024 Tutorial](https://aclanthology.org/2024.eacl-tutorials.5.pdf)
-- [NAACL 2024 Long Paper](https://aclanthology.org/2024.naacl-long.24v2.pdf)
