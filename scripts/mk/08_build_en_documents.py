@@ -16,9 +16,17 @@ tag so real-EN vs MT-EN can be analysed separately downstream.
 The run is resumable: documents already present in the output file are skipped,
 so an interrupted run (throttling, network) can simply be re-run.
 
+At scale, Path A via the API is impractical: Wikimedia's per-IP throttle drops
+to ~1 request/minute once triggered (4+ days for 7k docs). Use ``--hf-wikipedia``
+to stream a full EN Wikipedia snapshot from the HuggingFace CDN instead (no rate
+limits, ~20 min for any number of titles). Titles missing from the snapshot
+(renamed/new pages) can be topped up afterwards by re-running without the flag —
+resumability skips everything already written.
+
 Usage:
     python scripts/mk/08_build_en_documents.py
     python scripts/mk/08_build_en_documents.py --max-docs 20 --max-mt-docs 5   # smoke run
+    python scripts/mk/08_build_en_documents.py --hf-wikipedia 20231101.en --no-mt
 """
 
 from __future__ import annotations
@@ -47,7 +55,10 @@ MIN_TEXT_LENGTH = 200
 MIN_LATIN_RATIO = 0.60
 
 # Google translate endpoints (and deep-translator) reject very long inputs.
-TRANSLATE_MAX_CHARS = 4500
+# The limit applies to the URL-encoded request, and Cyrillic encodes at ~3 bytes
+# per character — parts over ~2000 chars of Macedonian text fail with a
+# RequestError even though the same length in Latin text would pass.
+TRANSLATE_MAX_CHARS = 1500
 
 WHITESPACE_PATTERN = re.compile(r"\s+")
 LATIN_PATTERN = re.compile(r"[A-Za-z]")
@@ -275,6 +286,49 @@ def fetch_en_extract(title: str, session: Any) -> Optional[Dict[str, Any]]:
     return parse_extract_response(resp.json())
 
 
+# ── HF snapshot streaming (Path A alternative, no rate limits) ────────────────
+
+
+def normalize_link_title(title: str) -> str:
+    """Normalize a langlinks EN title for matching: drop #fragment, _ → space."""
+    return title.split("#", 1)[0].replace("_", " ").strip()
+
+
+def stream_hf_extracts(
+    hf_config: str,
+    wanted_titles: Dict[str, List[Dict[str, Any]]],
+    log_every: int = 500_000,
+) -> Iterator[tuple[Dict[str, Any], Dict[str, Any]]]:
+    """
+    Stream a ``wikimedia/wikipedia`` snapshot and yield ``(alignment, extract)``
+    for every row whose title matches a wanted alignment. ``wanted_titles`` maps
+    normalized EN title → list of alignment records (deduped MK docs can share
+    an EN article).
+    """
+    from datasets import load_dataset
+
+    dataset = load_dataset("wikimedia/wikipedia", hf_config, split="train", streaming=True)
+
+    seen_rows = 0
+    for row in dataset:
+        seen_rows += 1
+        if seen_rows % log_every == 0:
+            logger.info("...streamed %d snapshot rows", seen_rows)
+
+        alignments = wanted_titles.get(row["title"])
+        if not alignments:
+            continue
+
+        extract = {
+            "pageid": row["id"],
+            "title": row["title"],
+            "text": row["text"],
+            "url": row.get("url") or f"https://en.wikipedia.org/wiki/{row['title'].replace(' ', '_')}",
+        }
+        for alignment in alignments:
+            yield alignment, extract
+
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 
@@ -287,6 +341,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-mt-docs", type=int, default=2000, help="Cap MK→EN translations.")
     parser.add_argument("--sleep", type=float, default=0.5, help="Seconds between network/MT calls.")
     parser.add_argument("--no-mt", action="store_true", help="Skip the MT path entirely.")
+    parser.add_argument("--hf-wikipedia", type=str, default=None, metavar="CONFIG",
+                        help="Stream Path A from a wikimedia/wikipedia HF snapshot "
+                             "(e.g. '20231101.en') instead of the rate-limited API.")
     return parser.parse_args()
 
 
@@ -343,25 +400,49 @@ def main() -> None:
     with args.output.open("a", encoding="utf-8") as out:
 
         # ── Path A: EN Wikipedia ──────────────────────────────────────────────
-        for alignment in linked:
-            if alignment["mk_doc_id"] in done_mk_ids:
-                continue
-            try:
-                extract = fetch_en_extract(alignment["en_title"], session)
-            except Exception as error:
-                logger.warning("EN fetch failed for '%s': %s", alignment["en_title"], error)
-                extract = None
+        if args.hf_wikipedia:
+            # Stream the snapshot once; write every wanted title as it flies by.
+            wanted_titles: Dict[str, List[Dict[str, Any]]] = {}
+            for alignment in linked:
+                if alignment["mk_doc_id"] in done_mk_ids:
+                    continue
+                title = normalize_link_title(alignment.get("en_title") or "")
+                if title:
+                    wanted_titles.setdefault(title, []).append(alignment)
 
-            if not extract or not is_good_english_text(extract["text"]):
-                skipped += 1
-            else:
+            logger.info("Streaming HF snapshot %s for %d wanted titles",
+                        args.hf_wikipedia, len(wanted_titles))
+
+            for alignment, extract in stream_hf_extracts(args.hf_wikipedia, wanted_titles):
+                if not is_good_english_text(extract["text"]):
+                    skipped += 1
+                    continue
                 doc = build_en_doc_wiki(alignment, extract)
                 out.write(json.dumps(doc, ensure_ascii=False) + "\n")
                 written += 1
                 wiki_count += 1
+                if wiki_count % 500 == 0:
+                    logger.info("...%d EN wiki docs written", wiki_count)
+        else:
+            for alignment in linked:
+                if alignment["mk_doc_id"] in done_mk_ids:
+                    continue
+                try:
+                    extract = fetch_en_extract(alignment["en_title"], session)
+                except Exception as error:
+                    logger.warning("EN fetch failed for '%s': %s", alignment["en_title"], error)
+                    extract = None
 
-            if args.sleep:
-                time.sleep(args.sleep)
+                if not extract or not is_good_english_text(extract["text"]):
+                    skipped += 1
+                else:
+                    doc = build_en_doc_wiki(alignment, extract)
+                    out.write(json.dumps(doc, ensure_ascii=False) + "\n")
+                    written += 1
+                    wiki_count += 1
+
+                if args.sleep:
+                    time.sleep(args.sleep)
 
         # ── Path B: machine translation ───────────────────────────────────────
         for alignment in needs_mt:

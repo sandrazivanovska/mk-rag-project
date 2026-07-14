@@ -78,6 +78,63 @@ def test_chunked_batches():
     assert list(link.chunked([1, 2, 3, 4, 5], 2)) == [[1, 2], [3, 4], [5]]
 
 
+# ── 07: offline SQL-dump parsing ──────────────────────────────────────────────
+
+
+def test_unescape_mysql():
+    assert link.unescape_mysql(r"O\'Brien") == "O'Brien"
+    assert link.unescape_mysql(r"a\\b") == "a\\b"
+    assert link.unescape_mysql("plain") == "plain"
+
+
+def test_sql_pair_pattern_parses_insert_tuples():
+    line = r"INSERT INTO `langlinks` VALUES (42,'en','Skopje'),(42,'de','Skopje'),(7,'en','O\'Brien (film)');"
+    pairs = link.SQL_PAIR_PATTERN.findall(line)
+    en = {pid: link.unescape_mysql(title) for pid, lang, title in pairs if lang == "en"}
+    assert en == {"42": "Skopje", "7": "O'Brien (film)"}
+
+
+def test_load_sql_pairs_filters_middle_column(tmp_path):
+    import gzip
+
+    sql = (
+        "-- MySQL dump\n"
+        "INSERT INTO `page_props` VALUES "
+        "(1,'wikibase_item','Q3919',NULL),(1,'page_image','x.jpg',NULL),"
+        "(2,'wikibase_item','Q629702',NULL);\n"
+    )
+    path = tmp_path / "props.sql.gz"
+    with gzip.open(path, "wt", encoding="utf-8") as file:
+        file.write(sql)
+
+    result = link.load_sql_pairs(path, "wikibase_item")
+    assert result == {"1": "Q3919", "2": "Q629702"}
+
+
+def test_iter_alignment_records_offline_uses_page_ids(tmp_path):
+    import gzip
+
+    langlinks = tmp_path / "langlinks.sql.gz"
+    with gzip.open(langlinks, "wt", encoding="utf-8") as file:
+        file.write("INSERT INTO `langlinks` VALUES (42,'en','Skopje'),(42,'fr','Skopje');\n")
+
+    pageprops = tmp_path / "props.sql.gz"
+    with gzip.open(pageprops, "wt", encoding="utf-8") as file:
+        file.write("INSERT INTO `page_props` VALUES (42,'wikibase_item','Q3919',NULL);\n")
+
+    documents = [
+        {"doc_id": "mk_wiki_42", "title": "Скопје", "metadata": {"original_id": "42"}},
+        {"doc_id": "mk_wiki_99", "title": "Непозната", "metadata": {"original_id": "99"}},
+    ]
+    records = list(link.iter_alignment_records_offline(documents, langlinks, pageprops))
+
+    assert records[0]["en_status"] == "linked"
+    assert records[0]["en_title"] == "Skopje"
+    assert records[0]["wikidata_qid"] == "Q3919"
+    assert records[1]["en_status"] == "needs_mt"
+    assert records[1]["en_title"] is None
+
+
 # ── 08: EN quality filter ────────────────────────────────────────────────────
 
 

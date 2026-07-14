@@ -31,11 +31,32 @@ analysed separately.
 # 07 — link MK docs to EN Wikipedia titles + Wikidata QIDs; split linked / needs_mt
 python scripts/mk/07_link_mk_to_en.py
 #   → data/processed/mk_en_alignment.jsonl
+#
+# At scale (1k+ docs) use OFFLINE mode instead — the per-IP API rate limit
+# (~1 batch/minute once throttled) makes the API path impractical. Download the
+# langlinks + page_props SQL dumps once and parse them locally (no network):
+#   curl -A "mk-rag-research/1.0 (<your email>)" -o data/raw/mk_wikipedia/mkwiki-latest-langlinks.sql.gz \
+#     https://dumps.wikimedia.org/mkwiki/latest/mkwiki-latest-langlinks.sql.gz
+#   curl -A "mk-rag-research/1.0 (<your email>)" -o data/raw/mk_wikipedia/mkwiki-latest-page_props.sql.gz \
+#     https://dumps.wikimedia.org/mkwiki/latest/mkwiki-latest-page_props.sql.gz
+python scripts/mk/07_link_mk_to_en.py \
+    --langlinks-sql data/raw/mk_wikipedia/mkwiki-latest-langlinks.sql.gz \
+    --pageprops-sql data/raw/mk_wikipedia/mkwiki-latest-page_props.sql.gz
 
 # 08 — fetch EN Wikipedia full text (Path A) + machine-translate the rest (Path B)
 #   Resumable: re-run after a throttle/interrupt and it skips what's done.
 python scripts/mk/08_build_en_documents.py --max-mt-docs 2000
 #   → data/processed/en_documents.jsonl
+#
+# At scale, Path A via the API hits the same per-IP throttle as 07 (~1 req/min
+# once triggered → days for thousands of docs). Use 08b instead: it Range-fetches
+# only the needed ~100-page bz2 blocks from the enwiki *multistream* dump
+# (static file server, no rate limits; ~1-2 h for 7k docs). Same output file and
+# resume semantics as 08, so run 08b first, then 08 to top up stragglers + MT:
+#   curl -A "mk-rag-research/1.0 (<your email>)" -o data/raw/enwiki-multistream-index.txt.bz2 \
+#     https://dumps.wikimedia.org/enwiki/latest/enwiki-latest-pages-articles-multistream-index.txt.bz2
+python scripts/mk/08b_fetch_en_multistream.py
+python scripts/mk/08_build_en_documents.py --max-mt-docs 3000   # stragglers + MT
 
 # 09 — chunk EN docs (reuses the MK sentence chunker; identical strategy)
 python scripts/mk/09_chunk_en_documents.py
@@ -52,6 +73,18 @@ python scripts/mk/10_build_en_index.py
 python scripts/mk/07_link_mk_to_en.py --max-docs 50
 python scripts/mk/08_build_en_documents.py --max-docs 20 --max-mt-docs 5
 python scripts/mk/09_chunk_en_documents.py
+```
+
+## Corpus capping (before 07)
+
+For CPU-only machines, cap the MK corpus before building the EN side — embedding
+the full corpus takes days. The capping script pins every gold-QA source article
+(from `data/evaluation/mk_qa_template_300.csv`) and fills the rest with seeded
+random distractors, so retrieval metrics stay valid:
+
+```bash
+python scripts/mk/02b_cap_mk_documents.py --target-size 10000
+# full corpus is preserved at data/processed/mk_documents_full.jsonl
 ```
 
 ## Notes
