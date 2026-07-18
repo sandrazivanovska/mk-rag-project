@@ -8,6 +8,12 @@ dist/
 build/
 .eggs/
 *.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
 .venv/
 venv/
 env/
@@ -17,8 +23,9 @@ env/
 *.env.local
 
 # Data (large files)
-data/raw/
+
 data/indices/
+data/raw/mk_wikipedia/
 data/processed/
 
 # Results
@@ -34,6 +41,16 @@ logs/
 .idea/
 *.swp
 *.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+*.bak
+*.log
 
 # Model cache
 .cache/
