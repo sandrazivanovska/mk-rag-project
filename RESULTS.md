@@ -69,11 +69,43 @@ of the time; when retrieval succeeded, only **3%**. It refuses rather than
 fabricating — and this is why faithfulness on retrieval misses is 0.40 rather
 than near zero: an honest refusal is faithful to a context lacking the answer.
 
+## Retrieval quality vs generation quality (two-factor)
+
+The second generator (`gemini-2.5-flash-lite`) was run by replaying the SAVED
+contexts, so retrieval is identical by construction and the generator is the
+only variable that changes. Both factors on the same scale, n = 1,800
+question-pipeline pairs, metric `token_f1`:
+
+| Factor | Effect | p |
+|---|---|---|
+| **Retrieval** (gold article retrieved vs not) | **+0.2029** | 1.3e-61 |
+| **Generator** (flash vs flash-lite) | +0.0146 | 3.2e-04 |
+
+**The retrieval effect is 14x the generator effect.** Both are real; they are
+not comparable in magnitude.
+
+### Does a stronger generator rescue bad retrieval?
+
+No. The generator gap is +0.0152 when retrieval succeeded and +0.0081 when it
+failed — statistically indistinguishable (p = 0.24). If anything the gap is
+smaller on failures: a better model can only exploit context that retrieval
+actually found.
+
+> In low-resource RAG, retrieval quality dominates generation quality by an
+> order of magnitude, and generator strength does not compensate for retrieval
+> failure.
+
+Scope: the generator contrast spans one tier within one model family
+(`gemini-2.5-flash` vs `gemini-2.5-flash-lite`). A substantially larger model
+was not tested.
+
+Per-pipeline results: [`results_public/gen2/`](results_public/gen2/).
+Reproduce with `python scripts/mk/19_generator_comparison.py`.
+
 ## Limitations
 
-1. **Single generator.** `gemini-2.5-flash` throughout, so the retrieval→
-   generation relationship is not verified across models. (A second generator
-   comparison is in `scripts/mk/18_second_generator.py`.)
+1. **Generator range.** Two generators were tested, one tier apart within
+   the same family. Behaviour of a substantially larger model is unknown.
 2. **Gold set.** 65% of questions are templated (28% *"…во дадениот извадок?"*,
    37% *"Кој важен податок…"*) and 93% of answers are copied verbatim from the
    source chunk. This limits how far any retriever can be distinguished and is

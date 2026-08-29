@@ -176,7 +176,10 @@ Six retrieval pipelines evaluated on 300 Macedonian questions.
 - **[SETUP.md](SETUP.md)** — reproduction guide and known pitfalls
 - **[results_public/](results_public/)** — per-question metrics for all six pipelines
 
-**Key finding:** retrieval quality drives answer quality (faithfulness 0.921 with
-successful retrieval vs 0.400 without, same generator), but the effect saturates —
-among the five non-BM25 pipelines no generation-quality difference is significant.
-Dense multilingual retrieval on Macedonian matches or beats pivoting through English.
+**Key finding:** retrieval quality dominates generation quality by an order of
+magnitude. Measured on the same scale over 1,800 question-pipeline pairs, the
+retrieval effect (+0.203 token F1) is **14x** the generator effect (+0.015), and a
+stronger generator does not compensate for retrieval failure (interaction p = 0.24).
+The effect saturates, though: among the five non-BM25 pipelines no generation-quality
+difference is significant. Dense multilingual retrieval on Macedonian matches or
+beats pivoting through English.
