@@ -16,6 +16,7 @@ Usage:
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Optional
 
@@ -147,6 +148,9 @@ def run_experiment(
     generator: str = typer.Option(..., help="Generator ID: gpt4o|claude_sonnet"),
     gold_path: Optional[Path] = typer.Option(None, help="Path to gold JSONL dataset"),
     output_dir: Optional[Path] = typer.Option(None, help="Output directory for results"),
+    judge_sample: Optional[int] = typer.Option(
+        None, help="Score RAGAS on only N questions (0 = all)."
+    ),
 ):
     """
     Step 3: Run a single pipeline experiment.
@@ -158,6 +162,11 @@ def run_experiment(
     settings = get_settings()
     out_dir = output_dir or Path(settings.experiment_output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    if judge_sample is None:
+        judge_sample = settings.ragas_sample
+    elif judge_sample == 0:
+        judge_sample = None
 
     console.print(f"[bold]Running: {pipeline} + {generator}[/bold]")
 
@@ -182,9 +191,19 @@ def run_experiment(
     results_raw = rag_pipeline.run_batch(queries)
 
     # Evaluate
-    evaluator = RAGEvaluator(ragas_llm_model=settings.openai_model)
+    evaluator = RAGEvaluator(
+            ragas_llm_model=settings.judge_model,
+            judge_provider=settings.judge_provider,
+            judge_embed_model=settings.judge_embed_model,
+            gemini_base_url=settings.gemini_openai_base_url,
+            use_vertex=settings.use_vertex,
+            vertex_project=settings.vertex_project,
+            vertex_location=settings.vertex_location,
+            ragas_sample=judge_sample,
+            ragas_seed=settings.ragas_seed,
+        )
     predictions = [r.generation for r in results_raw]
-    retrieved_docs_list = [r.final_docs for r in results_raw]
+    retrieved_docs_list = [r.retrieved_docs for r in results_raw]
 
     eval_results = evaluator.evaluate(
         pipeline_id=f"{pipeline}_{generator}",
@@ -208,8 +227,19 @@ def run_experiment(
 def run_all(
     gold_path: Optional[Path] = typer.Option(None, help="Path to gold JSONL dataset"),
     output_dir: Optional[Path] = typer.Option(None, help="Output directory for results"),
+    limit: Optional[int] = typer.Option(None, help="Only run the first N gold questions"),
+    generators: Optional[str] = typer.Option(
+        None, help="Comma-separated generator IDs, e.g. 'gemini_flash'"
+    ),
+    judge_sample: Optional[int] = typer.Option(
+        None, help="Score RAGAS on only N questions per pipeline (0 = all). "
+                   "RAGAS dominates cost; free local metrics still cover all."
+    ),
+    resume: bool = typer.Option(
+        True, help="Skip pipelines whose result file already exists."
+    ),
 ):
-    """Run all 12 pipeline variants and save results."""
+    """Run every retrieval setup × generator and save results."""
     from src.pipelines.factory import build_all_pipelines
     from src.evaluation.evaluator import RAGEvaluator
     from src.utils.config import get_settings
@@ -218,6 +248,13 @@ def run_all(
     out_dir = output_dir or Path(settings.experiment_output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    if judge_sample is None:
+        judge_sample = settings.ragas_sample
+    elif judge_sample == 0:
+        judge_sample = None
+
+    gids = [g.strip() for g in generators.split(",")] if generators else None
+
     queries, gold_data = [], []
     if gold_path and gold_path.exists():
         with open(gold_path, encoding="utf-8") as f:
@@ -225,6 +262,9 @@ def run_all(
                 item = json.loads(line)
                 queries.append(item["query"])
                 gold_data.append(item)
+        if limit:
+            queries, gold_data = queries[:limit], gold_data[:limit]
+            console.print(f"[yellow]Limited to first {len(queries)} questions[/yellow]")
     else:
         console.print("[yellow]No gold dataset – using sample queries[/yellow]")
         queries = [
@@ -233,17 +273,39 @@ def run_all(
         ]
 
     all_summaries = []
-    for pipeline in build_all_pipelines(settings=settings):
+    for pipeline in build_all_pipelines(settings=settings, generator_ids=gids):
         pid = pipeline.config.pipeline_id
+        out_file = out_dir / f"{pid}.jsonl"
+        if resume and out_file.exists():
+            # Each pipeline costs real money and hours; never redo one that
+            # already produced results just because a later pipeline crashed.
+            console.print(f"[dim]Skipping {pid} (results exist)[/dim]")
+            continue
         console.print(f"[bold]Running {pid}...[/bold]")
-        raw = pipeline.run_batch(queries)
-        evaluator = RAGEvaluator(ragas_llm_model=settings.openai_model)
+        try:
+            raw = pipeline.run_batch(queries)
+        except Exception as exc:
+            # One broken pipeline must not discard the other eleven.
+            console.print(f"[red]FAILED {pid}: {exc}[/red]")
+            logging.getLogger("main").exception("pipeline %s failed", pid)
+            continue
+        evaluator = RAGEvaluator(
+            ragas_llm_model=settings.judge_model,
+            judge_provider=settings.judge_provider,
+            judge_embed_model=settings.judge_embed_model,
+            gemini_base_url=settings.gemini_openai_base_url,
+            use_vertex=settings.use_vertex,
+            vertex_project=settings.vertex_project,
+            vertex_location=settings.vertex_location,
+            ragas_sample=judge_sample,
+            ragas_seed=settings.ragas_seed,
+        )
         eval_results = evaluator.evaluate(
             pipeline_id=pid,
             generator_id=pipeline.config.generator_id,
             predictions=[r.generation for r in raw],
             gold_data=gold_data or None,
-            retrieved_docs_list=[r.final_docs for r in raw],
+            retrieved_docs_list=[r.retrieved_docs for r in raw],
         )
         evaluator.save_results(eval_results, out_dir / f"{pid}.jsonl")
         all_summaries.append(evaluator.aggregate(eval_results))
@@ -287,6 +349,13 @@ def _print_summary_table(summaries: list[dict]) -> None:
     table = Table(title="Pipeline Comparison", show_lines=True)
     table.add_column("Pipeline", style="cyan")
     table.add_column("Generator", style="magenta")
+    # Retrieval quality
+    table.add_column("Hit@5", style="green")
+    table.add_column("MRR", style="green")
+    table.add_column("Hit@5\ndoc", style="bold green")
+    table.add_column("MRR\ndoc", style="bold green")
+    table.add_column("n_ret", style="dim")
+    # Generation quality
     table.add_column("Faithfulness")
     table.add_column("Ans. Relevancy")
     table.add_column("Ctx. Precision")
@@ -301,6 +370,11 @@ def _print_summary_table(summaries: list[dict]) -> None:
         table.add_row(
             s.get("pipeline_id", "-"),
             s.get("generator_id", "-"),
+            fmt(s.get("hit_at_5")),
+            fmt(s.get("mrr")),
+            fmt(s.get("hit_at_5_doc")),
+            fmt(s.get("mrr_doc")),
+            str(s.get("n_retrieval_scored", "-")),
             fmt(s.get("faithfulness")),
             fmt(s.get("answer_relevancy")),
             fmt(s.get("context_precision")),

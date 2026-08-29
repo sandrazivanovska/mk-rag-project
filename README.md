@@ -165,3 +165,18 @@ python main.py evaluate --results-dir results/
 ---
 
 
+
+---
+
+## Experiment results (Aug 2026)
+
+Six retrieval pipelines evaluated on 300 Macedonian questions.
+
+- **[RESULTS.md](RESULTS.md)** — findings, significance tests, limitations
+- **[SETUP.md](SETUP.md)** — reproduction guide and known pitfalls
+- **[results_public/](results_public/)** — per-question metrics for all six pipelines
+
+**Key finding:** retrieval quality drives answer quality (faithfulness 0.921 with
+successful retrieval vs 0.400 without, same generator), but the effect saturates —
+among the five non-BM25 pipelines no generation-quality difference is significant.
+Dense multilingual retrieval on Macedonian matches or beats pivoting through English.
