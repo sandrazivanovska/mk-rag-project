@@ -25,7 +25,7 @@ env/
 # Data (large files)
 
 data/indices/
-data/raw/mk_wikipedia/
+data/raw/
 data/processed/
 
 # Results
