@@ -62,3 +62,6 @@ huggingface/
 
 # Compact results ARE committed (results/ full outputs are not)
 !results_public/
+
+# Aggregate results are small and belong in the repo (*.json is ignored above)
+!results_public/summary.json
