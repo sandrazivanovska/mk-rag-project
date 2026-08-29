@@ -31,6 +31,13 @@ class PipelineConfig:
     use_reranker: bool = True
     top_k_retrieve: int = 50
     top_k_rerank: int = 5
+    # How many of the first-stage hits the cross-encoder actually scores.
+    # Reranking is the dominant cost on a small GPU (~34s/query for 50
+    # candidates on a GTX 1660 SUPER), and it scales linearly with this number.
+    # The full top_k_retrieve ranking is still returned for retrieval metrics,
+    # so recall@50 and MRR stay comparable across pipelines — only the
+    # reranker's candidate pool shrinks.
+    rerank_candidates: int = 20
     metadata: dict = field(default_factory=dict)
 
 
@@ -127,7 +134,11 @@ class RAGPipeline:
         reranked: Optional[list[RetrievedDoc]] = None
         if self.config.use_reranker and self.reranker and retrieved:
             # Rerank using the original MK query (not translated)
-            reranked = self.reranker.rerank(query, retrieved, top_k=self.config.top_k_rerank)
+            reranked = self.reranker.rerank(
+                query,
+                retrieved[: self.config.rerank_candidates],
+                top_k=self.config.top_k_rerank,
+            )
             logger.debug(f"Reranked to {len(reranked)} docs")
 
         # Step 4: Generate
